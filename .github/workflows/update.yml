@@ -1,0 +1,129 @@
+name: Update sources
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+    inputs:
+      update_nixpkgs:
+        description: Also update nixpkgs
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: update-sources
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      changed: ${{ steps.changes.outputs.changed }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Preserve a pending dependency update
+        run: bash scripts/prepare-lock.sh
+      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - name: Fetch release and compute hashes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPDATE_NIXPKGS: ${{ inputs.update_nixpkgs || github.event.schedule == '0 4 * * *' }}
+        run: |
+          args=()
+          if [[ "$UPDATE_NIXPKGS" == true ]]; then
+            args+=(--update-nixpkgs)
+          fi
+          if ! git diff --quiet -- flake.lock; then
+            args+=(--refresh)
+          fi
+          python3 scripts/update.py "${args[@]}"
+      - id: changes
+        run: |
+          if git diff --quiet -- sources.json flake.lock; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.changes.outputs.changed == 'true'
+        with:
+          name: updated-sources
+          path: |
+            sources.json
+            flake.lock
+          if-no-files-found: error
+          retention-days: 7
+
+  validate:
+    needs: prepare
+    if: needs.prepare.outputs.changed == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: updated-sources
+          path: candidate
+      - run: cp candidate/sources.json candidate/flake.lock .
+      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - run: nix flake check --no-write-lock-file --print-build-logs
+
+  pull-request:
+    needs: [prepare, validate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # No upstream code or Nix builds run in this write-capable job.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: updated-sources
+          path: candidate
+      - name: Create or refresh the update PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          BRANCH: automation/update-magpie
+        run: |
+          python3 -m json.tool candidate/sources.json > /dev/null
+          python3 -m json.tool candidate/flake.lock > /dev/null
+          git switch -c "$BRANCH"
+          cp candidate/sources.json candidate/flake.lock .
+          git add -- sources.json flake.lock
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'chore: update Magpie sources'
+          git push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
+          cat > "$RUNNER_TEMP/update-body.md" <<'EOF'
+          Update the pinned Magpie release and, on daily or requested runs, nixpkgs.
+
+          The candidate passed `nix flake check` on x86_64-linux and aarch64-linux, including privacy and plugin policy tests. Review the upstream changes and pinned hashes before merging.
+
+          Updates are proposed as a PR; this workflow does not merge or deploy them.
+          EOF
+          number=$(gh pr list --head "$BRANCH" --base "$BASE_BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [[ -n "$number" ]]; then
+            gh pr edit "$number" --title 'chore: update Magpie sources' --body-file "$RUNNER_TEMP/update-body.md"
+          else
+            gh pr create --head "$BRANCH" --base "$BASE_BRANCH" --title 'chore: update Magpie sources' --body-file "$RUNNER_TEMP/update-body.md"
+          fi

@@ -1,0 +1,42 @@
+--- a/internal/settings/settings.go
++++ b/internal/settings/settings.go
+@@ -1425,6 +1425,11 @@
+ }
+ 
+ func (s Settings) normal() Settings {
++	// Nix owns updates; disable optional usage reporting in this build.
++	s.NoStats = true
++	s.NoUsageStats = true
++	s.NoAutoUpdate = true
++	s.NoAutoDownload = true
+ 	if s.Theme == "" {
+ 		s.Theme = "system"
+ 	}
+--- a/internal/gateway/gateway.go
++++ b/internal/gateway/gateway.go
+@@ -569,9 +569,9 @@
+ 	go provider.KeepPluginsListed(ctx) // models a plugin's vendor drops or adds, while magpie runs
+ 	// and fetches the lists of the providers the user asked to keep fresh (#2135)
+ 	go provider.KeepListsFresh(ctx)
+-	// and keeps the community's plugins up to date, noting others' updates, and the Bun they run on
+-	go plugin.KeepUpdated(ctx)
+-	go plugin.KeepBunUpdated(ctx)
++	// Keep community plugins current; Nix supplies the pinned Bun runtime.
++	go plugin.KeepUpdated(ctx)
++	// Bun updates are managed by Nix.
+ 	// and, when settings say to, keeps the computer awake while agents work
+ 	go awake.Keep(ctx, func() awake.Level {
+ 		switch set := settings.Load(); {
+--- a/internal/plugin/updates.go
++++ b/internal/plugin/updates.go
+@@ -273,6 +273,10 @@
+ // every updateEvery, run by the magpie serving the gateway (one magpie,
+ // never two at once).
+ func KeepUpdated(ctx context.Context) {
++	// This switch stops background checks and installs; explicit updates still work.
++	if os.Getenv("MAGPIE_NO_PLUGIN_AUTO_UPDATE") == "1" {
++		return
++	}
+ 	t := time.NewTimer(30 * time.Second)
+ 	defer t.Stop()
+ 	for {
