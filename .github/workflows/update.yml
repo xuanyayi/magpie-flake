@@ -66,11 +66,7 @@ jobs:
   validate:
     needs: prepare
     if: needs.prepare.outputs.changed == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [ubuntu-24.04, ubuntu-24.04-arm]
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -117,7 +113,7 @@ jobs:
           cat > "$RUNNER_TEMP/update-body.md" <<'EOF'
           Update the pinned Magpie release and, on daily or requested runs, nixpkgs.
 
-          The candidate passed `nix flake check` on x86_64-linux and aarch64-linux, including privacy and plugin policy tests. Review the upstream changes and pinned hashes before merging.
+          The candidate passed `nix flake check` on x86_64-linux, including privacy and plugin policy tests. Review the upstream changes and pinned hashes before merging.
 
           Updates are proposed as a PR; this workflow does not merge or deploy them.
           EOF

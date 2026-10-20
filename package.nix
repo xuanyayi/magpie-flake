@@ -92,6 +92,6 @@ in
       homepage = "https://usemagpie.ai";
       license = lib.licenses.mit;
       mainProgram = "magpie";
-      platforms = ["x86_64-linux" "aarch64-linux"];
+      platforms = ["x86_64-linux"];
     };
   })

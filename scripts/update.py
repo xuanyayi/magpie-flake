@@ -77,8 +77,8 @@ def write_source(source):
 
 def vendor_hash():
     system = run("nix", "eval", "--impure", "--raw", "--expr", "builtins.currentSystem").stdout.strip()
-    if system not in {"x86_64-linux", "aarch64-linux"}:
-        raise ValueError("update on a supported Linux architecture")
+    if system != "x86_64-linux":
+        raise ValueError("update on x86_64-linux")
     command = (
         "nix", "build", f".#packages.{system}.magpie.goModules", "--no-link",
         "--no-write-lock-file", "--print-build-logs", "--log-format", "raw",
