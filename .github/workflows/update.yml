@@ -33,9 +33,8 @@ jobs:
       - name: Preserve a pending dependency update
         run: bash scripts/prepare-lock.sh
       - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
-      - name: Fetch release and compute hashes
+      - name: Fetch version tag and compute hashes
         env:
-          GH_TOKEN: ${{ github.token }}
           UPDATE_NIXPKGS: ${{ inputs.update_nixpkgs || github.event.schedule == '0 4 * * *' }}
         run: |
           args=()
@@ -111,7 +110,7 @@ jobs:
           git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'chore: update Magpie sources'
           git push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
           cat > "$RUNNER_TEMP/update-body.md" <<'EOF'
-          Update the pinned Magpie release and, on daily or requested runs, nixpkgs.
+          Update the pinned Magpie version tag and, on daily or requested runs, nixpkgs.
 
           The candidate passed `nix flake check` on x86_64-linux, including privacy and plugin policy tests. Review the upstream changes and pinned hashes before merging.
 

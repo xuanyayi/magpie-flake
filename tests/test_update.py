@@ -27,14 +27,25 @@ class UpdateTests(unittest.TestCase):
         root_patch.start()
         self.addCleanup(root_patch.stop)
 
-    def test_annotated_release_tag(self):
-        replies = [
-            {"tag_name": "v0.1.1295", "prerelease": False},
-            {"object": {"type": "tag", "sha": "b" * 40}},
-            {"object": {"type": "commit", "sha": "c" * 40}},
-        ]
-        with patch.object(updater, "github", side_effect=replies):
-            self.assertEqual(updater.latest_release(), ("0.1.1295", "c" * 40))
+    def test_latest_tag_does_not_require_a_release_entry(self):
+        refs = "\n".join([
+            "a" * 40 + "\trefs/tags/v0.1.999",
+            "b" * 40 + "\trefs/tags/v0.1.1295",
+            "c" * 40 + "\trefs/tags/v0.1.1295^{}",
+            "d" * 40 + "\trefs/tags/v0.1.1296-rc1",
+            "e" * 40 + "\trefs/tags/v0.1.1294",
+        ])
+        with patch.object(updater, "run", return_value=subprocess.CompletedProcess([], 0, refs, "")):
+            self.assertEqual(updater.latest_tag(), ("0.1.1295", "c" * 40))
+
+    def test_lightweight_tag(self):
+        refs = "b" * 40 + "\trefs/tags/v0.1.1295\n"
+        with patch.object(updater, "run", return_value=subprocess.CompletedProcess([], 0, refs, "")):
+            self.assertEqual(updater.latest_tag(), ("0.1.1295", "b" * 40))
+
+    def test_no_version_tag_rejected(self):
+        with patch.object(updater, "run", return_value=subprocess.CompletedProcess([], 0, "", "")), self.assertRaisesRegex(ValueError, "no vX.Y.Z"):
+            updater.latest_tag()
 
     def test_downgrade_and_moved_tag_rejected(self):
         for version, rev in [("0.1.999", "b" * 40), ("0.1.1294", "b" * 40)]:
@@ -42,7 +53,7 @@ class UpdateTests(unittest.TestCase):
                 updater.check_release(self.source, version, rev)
 
     def test_unchanged_does_not_build(self):
-        with patch.object(updater, "latest_release", return_value=("0.1.1294", "a" * 40)), patch.object(updater, "run") as run:
+        with patch.object(updater, "latest_tag", return_value=("0.1.1294", "a" * 40)), patch.object(updater, "run") as run:
             self.assertFalse(updater.update())
             run.assert_not_called()
 
@@ -53,7 +64,7 @@ class UpdateTests(unittest.TestCase):
                 return subprocess.CompletedProcess(args, 0, "", "")
             return subprocess.CompletedProcess(args, 0, json.dumps({"hash": updater.FAKE_HASH}), "")
 
-        with patch.object(updater, "latest_release", return_value=("0.1.1295", "b" * 40)), patch.object(updater, "run", side_effect=run), patch.object(updater, "vendor_hash", side_effect=RuntimeError("patch no longer applies")):
+        with patch.object(updater, "latest_tag", return_value=("0.1.1295", "b" * 40)), patch.object(updater, "run", side_effect=run), patch.object(updater, "vendor_hash", side_effect=RuntimeError("patch no longer applies")):
             with self.assertRaisesRegex(RuntimeError, "patch no longer applies"):
                 updater.update(update_nixpkgs=True)
         for name, content in self.before.items():
@@ -62,7 +73,7 @@ class UpdateTests(unittest.TestCase):
     def test_success_verifies_vendor_hash(self):
         new_hash = "sha256-" + "B" * 43 + "="
         command = ("nix", "build", "test-vendor")
-        with patch.object(updater, "latest_release", return_value=("0.1.1295", "b" * 40)), patch.object(updater, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps({"hash": updater.FAKE_HASH}), "")) as run, patch.object(updater, "vendor_hash", return_value=(new_hash, command)):
+        with patch.object(updater, "latest_tag", return_value=("0.1.1295", "b" * 40)), patch.object(updater, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps({"hash": updater.FAKE_HASH}), "")) as run, patch.object(updater, "vendor_hash", return_value=(new_hash, command)):
             self.assertTrue(updater.update())
             run.assert_any_call(*command)
         source = json.loads((self.root / "sources.json").read_text())
