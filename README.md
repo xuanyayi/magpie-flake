@@ -4,13 +4,11 @@
 
 ```sh
 nix run github:xuanyayi/magpie-flake
-nix build
-nix flake check
 ```
 
-关闭使用统计；主程序和 Bun 由 Nix 更新，社区插件保留自动更新。
-
-每 6 小时检查 Magpie 稳定版，每天 04:00 UTC 更新 nixpkgs，检查通过后提出 PR。
-本地更新：`python3 scripts/update.py --update-nixpkgs`。
+插件使用 Nix 提供的 Bun，最低版本为 1.4.4（修复
+[CVE-2026-111497](https://github.com/oven-sh/bun/security/advisories/GHSA-663w-cv8g-jj2p)）。
+如果 nixpkgs 中的 Bun 版本较旧，本包会使用已合入 nixpkgs 的 1.4.4 官方预编译包；
+nixpkgs 提供 1.4.4 或更新版本后自动使用其版本。此策略同样适用于 `follows` 和 overlay。
 
 MIT，改编自 [mtul0729/magpie-flake](https://github.com/mtul0729/magpie-flake)。

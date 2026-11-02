@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Update pinned release sources; restore files if fetching or vendoring fails."""
+"""Update pinned version tags; restore files if fetching or vendoring fails."""
 
 import argparse
 import json
@@ -8,40 +8,35 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
-API = "https://api.github.com/repos/yetone/magpie"
 FAKE_HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 REV = re.compile(r"[0-9a-f]{40}")
 HASH = re.compile(r"sha256-[A-Za-z0-9+/]{43}=")
 
 
-def github(path):
-    headers = {"Accept": "application/vnd.github+json", "User-Agent": "magpie-nix-updater"}
-    if token := os.environ.get("GH_TOKEN"):
-        headers["Authorization"] = f"Bearer {token}"
-    with urlopen(Request(API + path, headers=headers), timeout=60) as response:
-        return json.load(response)
-
-
-def latest_release():
-    release = github("/releases/latest")
-    tag = release["tag_name"]
-    if release.get("draft") or release.get("prerelease") or not re.fullmatch(r"v" + VERSION.pattern, tag):
-        raise ValueError("latest release is not a stable vX.Y.Z release")
-    obj = github("/git/ref/tags/" + tag)["object"]
-    # Annotated tags point at tag objects; pin the actual commit instead.
-    for _ in range(5):
-        if not REV.fullmatch(obj["sha"]):
-            raise ValueError("invalid release revision")
-        if obj["type"] == "commit":
-            return tag[1:], obj["sha"]
-        if obj["type"] != "tag":
-            break
-        obj = github("/git/tags/" + obj["sha"])["object"]
-    raise ValueError("release tag did not resolve to a commit")
+def latest_tag():
+    # Upstream publishes version tags before creating GitHub Release entries.
+    # Inspect all refs, sort numerically, and use peeled commits for annotated tags.
+    refs = run("git", "ls-remote", "--tags", "https://github.com/yetone/magpie.git", "refs/tags/v*").stdout
+    tags, commits = {}, {}
+    for line in refs.splitlines():
+        fields = line.split()
+        if len(fields) != 2:
+            continue
+        sha, ref = fields
+        match = re.fullmatch(r"refs/tags/v(" + VERSION.pattern + r")(\^\{\})?", ref)
+        if not match:
+            continue
+        if not REV.fullmatch(sha):
+            raise ValueError("invalid version tag revision")
+        target = commits if match[2] else tags
+        target[match[1]] = sha
+    if not tags:
+        raise ValueError("no vX.Y.Z version tags found")
+    version = max(tags, key=lambda v: tuple(map(int, v.split("."))))
+    return version, commits.get(version, tags[version])
 
 
 def validate_source(source):
@@ -62,7 +57,7 @@ def check_release(current, version, rev):
 
 
 def run(*args, check=True):
-    # Only API metadata requests need a token. Do not pass it into build tools.
+    # Public upstream fetches and builds do not need workflow credentials.
     env = {k: v for k, v in os.environ.items() if k not in {"GH_TOKEN", "GITHUB_TOKEN"}}
     result = subprocess.run(args, cwd=ROOT, env=env, text=True, capture_output=True)
     if check and result.returncode:
@@ -96,7 +91,7 @@ def update(update_nixpkgs=False, refresh=False):
     try:
         current = json.loads(before[paths[0]])
         validate_source(current)
-        version, rev = latest_release()
+        version, rev = latest_tag()
         check_release(current, version, rev)
         if update_nixpkgs:
             run("nix", "flake", "update", "nixpkgs")
@@ -122,7 +117,7 @@ def update(update_nixpkgs=False, refresh=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--update-nixpkgs", action="store_true", help="also advance the nixpkgs lock")
-    parser.add_argument("--refresh", action="store_true", help="recompute hashes even if the release is unchanged")
+    parser.add_argument("--refresh", action="store_true", help="recompute hashes even if the version is unchanged")
     args = parser.parse_args()
     try:
         update(args.update_nixpkgs, args.refresh)
