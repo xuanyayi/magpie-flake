@@ -32,7 +32,7 @@ jobs:
           persist-credentials: false
       - name: Preserve a pending dependency update
         run: bash scripts/prepare-lock.sh
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
       - name: Fetch version tag and compute hashes
         env:
           UPDATE_NIXPKGS: ${{ inputs.update_nixpkgs || github.event.schedule == '0 4 * * *' }}
@@ -76,7 +76,7 @@ jobs:
           name: updated-sources
           path: candidate
       - run: cp candidate/sources.json candidate/flake.lock .
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
       - run: nix flake check --no-write-lock-file --print-build-logs
 
   pull-request:
