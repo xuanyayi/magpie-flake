@@ -4,7 +4,6 @@
   lib,
   buildGoModule,
   fetchFromGitHub,
-  fetchurl,
   makeDesktopItem,
   makeWrapper,
   pkg-config,
@@ -13,27 +12,6 @@
   bun,
 }: let
   source = builtins.fromJSON (builtins.readFile ./sources.json);
-  # CVE-2026-111497 is fixed in Bun 1.4.4. Keep this floor even when a
-  # consumer follows an older nixpkgs; prefer its Bun once it is new enough.
-  # Backport of NixOS/nixpkgs 54de6a06226b3ac00fa6446a28b3087205fe7042.
-  bunRuntime =
-    if lib.versionAtLeast bun.version "1.4.4"
-    then bun
-    else
-      bun.overrideAttrs (finalAttrs: previousAttrs: {
-        version = "1.4.4";
-        src = finalAttrs.passthru.sources.x86_64-linux;
-        passthru =
-          previousAttrs.passthru
-          // {
-            sources = {
-              x86_64-linux = fetchurl {
-                url = "https://github.com/oven-sh/bun/releases/download/bun-v${finalAttrs.version}/bun-linux-x64-baseline.zip";
-                hash = "sha256-4ERutVmVdy65iUvrrppr42jZhai5Jx7hJEhvmUbu3XY=";
-              };
-            };
-          };
-      });
 in
   buildGoModule (finalAttrs: {
     pname = "magpie";
@@ -93,10 +71,10 @@ in
     '';
 
     postFixup = ''
-      wrapProgram $out/bin/magpie --set MAGPIE_BUN ${lib.getExe bunRuntime}
+      wrapProgram $out/bin/magpie --set MAGPIE_BUN ${lib.getExe bun}
     '';
 
-    passthru.bun = bunRuntime;
+    passthru = {inherit bun;};
 
     doInstallCheck = true;
     installCheckPhase = ''
@@ -106,8 +84,8 @@ in
       export XDG_CACHE_HOME="$HOME/.cache"
       export XDG_DATA_HOME="$HOME/.local/share"
       export XDG_STATE_HOME="$HOME/.local/state"
-      ${lib.getExe bunRuntime} --version | grep -Fx '${bunRuntime.version}'
-      ${lib.getExe bunRuntime} -e '
+      ${lib.getExe bun} --version | grep -Fx '${bun.version}'
+      ${lib.getExe bun} -e '
         const { brotliCompressSync, brotliDecompressSync } = require("node:zlib");
         const input = "magpie plugin runtime";
         if (brotliDecompressSync(brotliCompressSync(input)).toString() !== input) {
