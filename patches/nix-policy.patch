@@ -14,15 +14,11 @@
  	}
 --- a/internal/gateway/gateway.go
 +++ b/internal/gateway/gateway.go
-@@ -569,9 +569,9 @@
- 	go provider.KeepPluginsListed(ctx) // models a plugin's vendor drops or adds, while magpie runs
- 	// and fetches the lists of the providers the user asked to keep fresh (#2135)
- 	go provider.KeepListsFresh(ctx)
+@@ -572,6 +572,6 @@
 -	// and keeps the community's plugins up to date, noting others' updates, and the Bun they run on
--	go plugin.KeepUpdated(ctx)
--	go plugin.KeepBunUpdated(ctx)
 +	// Keep community plugins current; Nix supplies the pinned Bun runtime.
-+	go plugin.KeepUpdated(ctx)
+ 	go plugin.KeepUpdated(ctx)
+-	go plugin.KeepBunUpdated(ctx)
 +	// Bun updates are managed by Nix.
  	// and, when settings say to, keeps the computer awake while agents work
  	go awake.Keep(ctx, func() awake.Level {
