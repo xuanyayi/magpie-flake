@@ -107,7 +107,9 @@ jobs:
           git switch -C "$BRANCH"
           cp candidate/sources.json candidate/flake.lock .
           git add -- sources.json flake.lock
-          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'chore: update Magpie sources'
+          # validate already checked this candidate. Skip the redundant PR workflow
+          # before the GITHUB_TOKEN approval gate, which precedes job-level if checks.
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'chore: update Magpie sources [skip ci]'
           git push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
           cat > "$RUNNER_TEMP/update-body.md" <<'EOF'
           Update the pinned Magpie version tag and, on daily or requested runs, nixpkgs.
