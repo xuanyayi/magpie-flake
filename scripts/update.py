@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Update pinned version tags; restore files if fetching or vendoring fails."""
+"""Update the pinned Magpie Stable release and optionally nixpkgs."""
 
 import argparse
 import json
@@ -8,35 +8,34 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
+STABLE_FEED = "https://usemagpie.ai/api/latest?channel=stable"
 FAKE_HASH = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 REV = re.compile(r"[0-9a-f]{40}")
 HASH = re.compile(r"sha256-[A-Za-z0-9+/]{43}=")
 
 
-def latest_tag():
-    # Upstream publishes version tags before creating GitHub Release entries.
-    # Inspect all refs, sort numerically, and use peeled commits for annotated tags.
-    refs = run("git", "ls-remote", "--tags", "https://github.com/yetone/magpie.git", "refs/tags/v*").stdout
-    tags, commits = {}, {}
-    for line in refs.splitlines():
-        fields = line.split()
-        if len(fields) != 2:
-            continue
-        sha, ref = fields
-        match = re.fullmatch(r"refs/tags/v(" + VERSION.pattern + r")(\^\{\})?", ref)
-        if not match:
-            continue
-        if not REV.fullmatch(sha):
-            raise ValueError("invalid version tag revision")
-        target = commits if match[2] else tags
-        target[match[1]] = sha
-    if not tags:
-        raise ValueError("no vX.Y.Z version tags found")
-    version = max(tags, key=lambda v: tuple(map(int, v.split("."))))
-    return version, commits.get(version, tags[version])
+def latest_stable():
+    request = Request(STABLE_FEED, headers={"User-Agent": "magpie-flake-updater"})
+    with urlopen(request, timeout=30) as response:
+        release = json.load(response)
+    if not isinstance(release, dict) or release.get("channel") != "stable":
+        raise ValueError("upstream feed did not return a Stable release")
+    version = release.get("version")
+    if not isinstance(version, str) or not VERSION.fullmatch(version):
+        raise ValueError("invalid version from the upstream Stable feed")
+
+    tag = f"refs/tags/v{version}"
+    peeled = tag + "^{}"
+    result = run("git", "ls-remote", "--exit-code", "--tags", "https://github.com/yetone/magpie.git", tag, peeled)
+    refs = {ref: sha for sha, ref in (line.split("\t") for line in result.stdout.splitlines())}
+    rev = refs.get(peeled, refs.get(tag, ""))
+    if not REV.fullmatch(rev):
+        raise ValueError(f"invalid revision for Stable tag v{version}")
+    return version, rev
 
 
 def validate_source(source):
@@ -85,17 +84,21 @@ def vendor_hash():
     return found.pop(), command
 
 
-def update(update_nixpkgs=False, refresh=False):
+def update(update_nixpkgs=False, refresh=False, nixpkgs_only=False):
     paths = [ROOT / "sources.json", ROOT / "flake.lock"]
     before = {p: p.read_bytes() for p in paths}
-    try:
-        current = json.loads(before[paths[0]])
-        validate_source(current)
-        version, rev = latest_tag()
+    current = json.loads(before[paths[0]])
+    validate_source(current)
+    if nixpkgs_only:
+        version, rev = current["version"], current["rev"]
+    else:
+        version, rev = latest_stable()
         check_release(current, version, rev)
-        if update_nixpkgs:
+    changed = (version, rev) != (current["version"], current["rev"])
+
+    try:
+        if update_nixpkgs or nixpkgs_only:
             run("nix", "flake", "update", "nixpkgs")
-        changed = (version, rev) != (current["version"], current["rev"])
         if changed or refresh or paths[1].read_bytes() != before[paths[1]]:
             url = f"https://github.com/yetone/magpie/archive/{rev}.tar.gz"
             fetched = json.loads(run("nix", "store", "prefetch-file", "--unpack", "--json", url).stdout)
@@ -116,11 +119,13 @@ def update(update_nixpkgs=False, refresh=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--update-nixpkgs", action="store_true", help="also advance the nixpkgs lock")
+    nixpkgs = parser.add_mutually_exclusive_group()
+    nixpkgs.add_argument("--update-nixpkgs", action="store_true", help="also advance the nixpkgs lock")
+    nixpkgs.add_argument("--nixpkgs-only", action="store_true", help="advance nixpkgs using the currently pinned Magpie version")
     parser.add_argument("--refresh", action="store_true", help="recompute hashes even if the version is unchanged")
     args = parser.parse_args()
     try:
-        update(args.update_nixpkgs, args.refresh)
+        update(args.update_nixpkgs, args.refresh, args.nixpkgs_only)
     except Exception as error:
         print(error, file=sys.stderr)
         sys.exit(1)

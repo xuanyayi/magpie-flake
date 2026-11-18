@@ -2,8 +2,11 @@ name: Update sources
 
 on:
   schedule:
-    - cron: '17 */6 * * *'
+    # Upstream's weekly Stable cutover is Monday at 00:00 UTC.
+    - cron: '10 0 * * 1'
     - cron: '0 4 * * *'
+  repository_dispatch:
+    types: [magpie-stable-updated]
   workflow_dispatch:
     inputs:
       update_nixpkgs:
@@ -33,12 +36,15 @@ jobs:
       - name: Preserve a pending dependency update
         run: bash scripts/prepare-lock.sh
       - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
-      - name: Fetch version tag and compute hashes
+      - name: Resolve sources and compute hashes
         env:
-          UPDATE_NIXPKGS: ${{ inputs.update_nixpkgs || github.event.schedule == '0 4 * * *' }}
+          NIXPKGS_ONLY: ${{ github.event.schedule == '0 4 * * *' }}
+          UPDATE_NIXPKGS: ${{ inputs.update_nixpkgs }}
         run: |
           args=()
-          if [[ "$UPDATE_NIXPKGS" == true ]]; then
+          if [[ "$NIXPKGS_ONLY" == true ]]; then
+            args+=(--nixpkgs-only)
+          elif [[ "$UPDATE_NIXPKGS" == true ]]; then
             args+=(--update-nixpkgs)
           fi
           if ! git diff --quiet -- flake.lock; then
@@ -112,7 +118,7 @@ jobs:
           git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'chore: update Magpie sources [skip ci]'
           git push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
           cat > "$RUNNER_TEMP/update-body.md" <<'EOF'
-          Update the pinned Magpie version tag and, on daily or requested runs, nixpkgs.
+          Refresh the pinned upstream Magpie Stable release or the nixpkgs lock.
 
           The candidate passed `nix flake check` on x86_64-linux, including privacy and plugin policy tests.
 
